@@ -6,7 +6,7 @@ run test.py
 
 or if u want to check the data run extract.py and then modelJL.py
 
-#results 
+# results 
 Accuracy: 0.958904109589041
               precision    recall  f1-score   support
 
