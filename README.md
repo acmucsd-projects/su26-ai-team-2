@@ -6,8 +6,8 @@ run test.py
 
 or if u want to check the data run extract.py and then modelJL.py
 # Results 
-Accuracy: 0.958904109589041
-              precision    recall  f1-score   support
+Accuracy: 0.958904109589041 <br />
+          precision    recall  f1-score   support
 
            0       0.86      0.75      0.80         8
            1       0.93      1.00      0.96        13
@@ -47,5 +47,5 @@ Accuracy: 0.958904109589041
            z       1.00      0.91      0.95        11
 
     accuracy                           0.96       365
-   macro avg       0.96      0.96      0.96       365
-weighted avg       0.96      0.96      0.96       365
+
+
