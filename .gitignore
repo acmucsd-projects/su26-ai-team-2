@@ -4,7 +4,6 @@ venv/
 .env
 .ipynb_checkpoints/
 *.zip
-models/*.pkl
 !models/.gitkeep
 .vscode/
 .DS_Store
