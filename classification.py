@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import tensorflow as tf
-
+from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras import layers, models
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 
 DATASET_DIR = "/Users/aashutosh/Documents/Kaggle/asl_dataset/asl_dataset"
 
-IMG_SIZE = (128, 128)
+IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
-EPOCHS = 20
-NUM_CLASSES = 36
+EPOCHS = 60
+NUM_CLASSES = 24
 
 MODEL_PATH = "asl_baseline_model.keras"
 
@@ -36,6 +36,26 @@ train_ds = tf.keras.utils.image_dataset_from_directory(
     batch_size=BATCH_SIZE,
     label_mode="int",
 )
+print(train_ds.class_names)
+print(len(train_ds.class_names))
+
+labels = []
+
+for _, y in train_ds.unbatch():
+    labels.append(int(y.numpy()))
+
+class_weights = compute_class_weight(
+    class_weight="balanced",
+    classes=np.unique(labels),
+    y=labels
+)
+
+class_weight_dict = {
+    i: class_weights[i]
+    for i in range(len(class_weights))
+}
+
+print(class_weight_dict)
 
 validation_ds = tf.keras.utils.image_dataset_from_directory(
     DATASET_DIR,
@@ -62,18 +82,27 @@ print("\nNumber of classes:", len(class_names))
 
 AUTOTUNE = tf.data.AUTOTUNE
 
-train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-validation_ds = validation_ds.prefetch(buffer_size=AUTOTUNE)
+train_ds = (
+    train_ds
+    .cache()
+    .shuffle(1000)
+    .prefetch(AUTOTUNE)
+)
 
+validation_ds = (
+    validation_ds
+    .cache()
+    .prefetch(AUTOTUNE)
+)
 
 # ============================================================
 # Data Augmentation
 # ============================================================
 
-data_augmentation = models.Sequential([
+data_augmentation = tf.keras.Sequential([
     layers.RandomRotation(0.02),
     layers.RandomZoom(0.05),
-], name="augmentation")
+])
 
 
 # ============================================================
@@ -92,34 +121,21 @@ def build_model(num_classes):
     # Freeze pretrained layers initially
     base_model.trainable = False
 
-    inputs = layers.Input(
-        shape=IMG_SIZE + (3,)
-    )
+    inputs = layers.Input(shape=IMG_SIZE + (3,))
 
-    # Data augmentation
     x = data_augmentation(inputs)
-
-    # IMPORTANT:
-    # Do NOT add:
-    #
-    # layers.Rescaling(1.0 / 255)
-    #
-    # EfficientNetB0 already handles its own input rescaling.
 
     x = base_model(
         x,
         training=False
     )
 
-    # Convert feature maps into a single feature vector
     x = layers.GlobalAveragePooling2D()(x)
 
-    # Reduce overfitting
-    x = layers.Dropout(0.3)(x)
+    x = layers.Dropout(0.4)(x)
 
-    # Classification layer
     x = layers.Dense(
-        128,
+        256,
         activation="relu"
     )(x)
 
@@ -135,21 +151,22 @@ def build_model(num_classes):
     )
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(
-            learning_rate=1e-4
+        optimizer=tf.keras.optimizers.AdamW(
+            learning_rate=3e-4,
+            weight_decay=1e-5,
         ),
-        loss="sparse_categorical_crossentropy",
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
         metrics=["accuracy"],
     )
 
-    return model
+    return model, base_model
 
 
 # ============================================================
 # Create Model
 # ============================================================
 
-model = build_model(NUM_CLASSES)
+model, base_model = build_model(NUM_CLASSES)
 
 print("\nModel Summary:")
 model.summary()
@@ -164,7 +181,7 @@ callbacks = [
     # Stop training if validation accuracy stops improving
     tf.keras.callbacks.EarlyStopping(
         monitor="val_accuracy",
-        patience=5,
+        patience=8,
         restore_best_weights=True
     ),
 
@@ -178,9 +195,10 @@ callbacks = [
     # Reduce learning rate if validation accuracy plateaus
     tf.keras.callbacks.ReduceLROnPlateau(
         monitor="val_loss",
-        factor=0.5,
+        factor=0.2,
         patience=2,
-        min_lr=1e-7
+        min_lr=1e-7,
+        verbose=1
     )
 ]
 
@@ -195,19 +213,26 @@ history = model.fit(
     train_ds,
     validation_data=validation_ds,
     epochs=EPOCHS,
-    callbacks=callbacks
+    callbacks=callbacks,
+    class_weight=class_weight_dict
 )
-
 
 # ============================================================
 # Print Accuracy History
 # ============================================================
 
+# Combine histories from initial training + fine-tuning
+train_acc = history.history["accuracy"]
+val_acc = history.history["val_accuracy"]
+
+train_loss = history.history["loss"]
+val_loss = history.history["val_loss"]
+
 print("\nTraining Accuracy History:")
-print(history.history["accuracy"])
+print(train_acc)
 
 print("\nValidation Accuracy History:")
-print(history.history["val_accuracy"])
+print(val_acc)
 
 
 # ============================================================
@@ -217,12 +242,12 @@ print(history.history["val_accuracy"])
 plt.figure(figsize=(8, 5))
 
 plt.plot(
-    history.history["accuracy"],
+    train_acc,
     label="Training Accuracy"
 )
 
 plt.plot(
-    history.history["val_accuracy"],
+    val_acc,
     label="Validation Accuracy"
 )
 
@@ -242,24 +267,6 @@ plt.close()
 
 print("\nSaved training_curves.png")
 
-
-# ============================================================
-# Evaluate on Validation Set
-# ============================================================
-
-print("\nEvaluating model...")
-
-test_loss, test_accuracy = model.evaluate(
-    validation_ds,
-    verbose=1
-)
-
-print(
-    f"\nTest accuracy: {test_accuracy:.4f}"
-    f"   |   Test loss: {test_loss:.4f}"
-)
-
-
 # ============================================================
 # Generate Predictions
 # ============================================================
@@ -269,23 +276,12 @@ y_pred = []
 
 for images, labels in validation_ds:
 
-    predictions = model.predict(
-        images,
-        verbose=0
-    )
+    predictions = model.predict(images, verbose=0)
 
-    predicted_classes = np.argmax(
-        predictions,
-        axis=1
-    )
+    predicted_classes = np.argmax(predictions, axis=1)
 
-    y_true.extend(
-        labels.numpy()
-    )
-
-    y_pred.extend(
-        predicted_classes
-    )
+    y_true.extend(labels.numpy())
+    y_pred.extend(predicted_classes)
 
 
 y_true = np.array(y_true)
