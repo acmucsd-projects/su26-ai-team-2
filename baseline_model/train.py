@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from dataloader import asl_data, train_loader, val_loader, test_loader
-from model import ASLCNN
+from baseline_model.dataloader import asl_data, train_loader, val_loader, test_loader
+from baseline_model.model import ASLCNN
 
 # Initialize model
 num_classes = len(asl_data.classes)
