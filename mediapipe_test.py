@@ -7,7 +7,9 @@ from mediapipe.tasks.python import vision
 
 from tensorflow.keras.models import load_model
 
-from collections import deque, Counter
+from prediction_stabilizer import PredictionStabilizer
+
+
 # ----------------------------
 # Hand landmark connections
 # ----------------------------
@@ -20,13 +22,17 @@ HAND_CONNECTIONS = [
     (0, 17)
 ]
 
+
+# ----------------------------
+# Class names
+# ----------------------------
 class_names = [
-    '0','1','2','3','4','5','6','7','8','9',
-    'a','b','c','d','e','f','g','h','i','j',
-    'k','l','m','n','o','p','q','r','s','t',
-    'u','v','w','x','y','z'
+    'a', 'b', 'c', 'd', 'e', 'f',
+    'g', 'h', 'i', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y'
 ]
-prediction_buffer = deque(maxlen=10)
+
 
 # ----------------------------
 # Load MediaPipe Hand Landmarker
@@ -41,9 +47,23 @@ options = vision.HandLandmarkerOptions(
 )
 
 detector = vision.HandLandmarker.create_from_options(options)
+
+
+# ----------------------------
+# Load CNN classifier
+# ----------------------------
 classifier = load_model("asl_baseline_model.keras")
 
 print("CNN model loaded successfully!")
+
+
+# ----------------------------
+# Create prediction stabilizer
+# ----------------------------
+stabilizer = PredictionStabilizer(
+    required_frames=8
+)
+
 
 # ----------------------------
 # Open webcam
@@ -57,16 +77,21 @@ if not cap.isOpened():
 print("Webcam opened successfully!")
 print("Press 'q' to quit.")
 
+
 # ----------------------------
 # Main loop
 # ----------------------------
 while True:
+
     success, frame = cap.read()
 
     if not success:
         break
 
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    rgb_frame = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2RGB
+    )
 
     mp_image = mp.Image(
         image_format=mp.ImageFormat.SRGB,
@@ -76,39 +101,94 @@ while True:
     result = detector.detect(mp_image)
 
     if len(result.hand_landmarks) > 0:
+
         for hand_landmarks in result.hand_landmarks:
+
             h, w, _ = frame.shape
 
-            xs = [landmark.x * w for landmark in hand_landmarks]
-            ys = [landmark.y * h for landmark in hand_landmarks]
+            # ----------------------------
+            # Get bounding box
+            # ----------------------------
+            xs = [
+                landmark.x * w
+                for landmark in hand_landmarks
+            ]
 
-            padding = 0
+            ys = [
+                landmark.y * h
+                for landmark in hand_landmarks
+            ]
+
+            # Add padding around the detected hand
+            raw_width = max(xs) - min(xs)
+            raw_height = max(ys) - min(ys)
+
+            padding = int(0.20 * max(raw_width, raw_height))
 
             x_min = max(int(min(xs)) - padding, 0)
             y_min = max(int(min(ys)) - padding, 0)
             x_max = min(int(max(xs)) + padding, w)
             y_max = min(int(max(ys)) + padding, h)
 
-            # Make the bounding box square
+            # ----------------------------
+            # Make bounding box square
+            # ----------------------------
             box_width = x_max - x_min
             box_height = y_max - y_min
-            side = max(box_width, box_height)
 
-            center_x = (x_min + x_max) // 2
-            center_y = (y_min + y_max) // 2
+            side = max(
+                box_width,
+                box_height
+            )
 
-            x_min = max(center_x - side // 2, 0)
-            y_min = max(center_y - side // 2, 0)
+            center_x = (
+                x_min + x_max
+            ) // 2
 
-            x_max = min(x_min + side, w)
-            y_max = min(y_min + side, h)
+            center_y = (
+                y_min + y_max
+            ) // 2
 
-            # If box hits image boundary, shift it back
+            x_min = max(
+                center_x - side // 2,
+                0
+            )
+
+            y_min = max(
+                center_y - side // 2,
+                0
+            )
+
+            x_max = min(
+                x_min + side,
+                w
+            )
+
+            y_max = min(
+                y_min + side,
+                h
+            )
+
+
+            # ----------------------------
+            # Shift box if it hits boundary
+            # ----------------------------
             if x_max == w:
-                x_min = max(w - side, 0)
-            if y_max == h:
-                y_min = max(h - side, 0)
+                x_min = max(
+                    w - side,
+                    0
+                )
 
+            if y_max == h:
+                y_min = max(
+                    h - side,
+                    0
+                )
+
+
+            # ----------------------------
+            # Draw bounding box
+            # ----------------------------
             cv2.rectangle(
                 frame,
                 (x_min, y_min),
@@ -117,40 +197,84 @@ while True:
                 2
             )
 
-            hand_crop = frame[y_min:y_max, x_min:x_max]
+
+            # ----------------------------
+            # Crop hand
+            # ----------------------------
+            hand_crop = frame[
+                y_min:y_max,
+                x_min:x_max
+            ]
 
             if hand_crop.size == 0:
                 continue
 
-            # Convert crop to RGB for the model
-            hand_crop_rgb = cv2.cvtColor(hand_crop, cv2.COLOR_BGR2RGB)
 
-            cv2.imshow("Hand Crop", hand_crop)
+            # ----------------------------
+            # Prepare CNN input
+            # ----------------------------
+            hand_crop_rgb = cv2.cvtColor(
+                hand_crop,
+                cv2.COLOR_BGR2RGB
+            )
 
-            # Resize to the same size used during training
-            cnn_input = cv2.resize(hand_crop_rgb, (128, 128))
+            cv2.imshow(
+                "Hand Crop",
+                hand_crop
+            )
 
-            # Convert to float
-            cnn_input = cnn_input.astype(np.float32)
+            cnn_input = cv2.resize(
+                hand_crop_rgb,
+                (224, 224)
+            )
 
-            # Normalize
-            cnn_input = cnn_input / 255.0
+            cnn_input = cnn_input.astype(
+                np.float32
+            )
 
-            # Add batch dimension
-            cnn_input = np.expand_dims(cnn_input, axis=0)
+            cnn_input = np.expand_dims(
+                cnn_input,
+                axis=0
+            )
 
-            prediction = classifier.predict(cnn_input, verbose=0)
+
+            # ----------------------------
+            # CNN prediction
+            # ----------------------------
+            prediction = classifier.predict(
+                cnn_input,
+                verbose=0
+            )
 
             pred_index = np.argmax(prediction)
-            confidence = prediction[0][pred_index]
+
+            confidence = float(
+                prediction[0][pred_index]
+            )
+
             predicted_letter = class_names[pred_index]
 
-            prediction_buffer.append(predicted_letter)
-            stable_letter = Counter(prediction_buffer).most_common(1)[0][0]
+            print(
+                f"Raw prediction: {predicted_letter} "
+                f"| Confidence: {confidence:.3f}"
+            )
 
+            # Only allow confident predictions into the stabilizer
+            if confidence >= 0.80:
 
-            label = f"{stable_letter} ({confidence:.2f})"
-    
+                stable_letter = stabilizer.update(
+                    predicted_letter
+                )
+
+                if stable_letter:
+                    print(
+                        f"Accepted: {stable_letter}"
+                    )
+
+            else:
+                stabilizer.reset()
+
+            label = f"{predicted_letter} ({confidence:.2f})"
 
             cv2.putText(
                 frame,
@@ -161,19 +285,46 @@ while True:
                 (0, 255, 0),
                 2
             )
-
-            print(label)
-
+            # ----------------------------
+            # Draw hand landmarks
+            # ----------------------------
             for landmark in hand_landmarks:
-                x = int(landmark.x * w)
-                y = int(landmark.y * h)
 
-                cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+                x = int(
+                    landmark.x * w
+                )
 
-    cv2.imshow("Hand Detection", frame)
+                y = int(
+                    landmark.y * h
+                )
 
+                cv2.circle(
+                    frame,
+                    (x, y),
+                    5,
+                    (0, 255, 0),
+                    -1
+                )
+
+
+    # ----------------------------
+    # Display webcam
+    # ----------------------------
+    cv2.imshow(
+        "Hand Detection",
+        frame
+    )
+
+
+    # ----------------------------
+    # Quit
+    # ----------------------------
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
+
+# ----------------------------
+# Cleanup
+# ----------------------------
 cap.release()
 cv2.destroyAllWindows()
