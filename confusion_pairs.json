@@ -1,0 +1,12 @@
+[
+    {
+        "true_class": "w",
+        "predicted_class": "v",
+        "count": 2
+    },
+    {
+        "true_class": "v",
+        "predicted_class": "k",
+        "count": 1
+    }
+]

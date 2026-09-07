@@ -1,0 +1,9 @@
+{
+    "window_size": 15,
+    "min_stable_predictions": 8,
+    "min_confidence": 0.45,
+    "min_margin": 0.15,
+    "min_consensus_ratio": 0.6,
+    "suppress_duplicate": true,
+    "recency_weight": 1.15
+}
