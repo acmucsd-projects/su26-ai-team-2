@@ -21,6 +21,35 @@ def normalize_landmarks(landmarks):
         coords /= max_dist
     return coords.flatten()
 
+def upscale_if_small(image, min_side=300):
+    h, w = image.shape[:2]
+    if min(h, w) < min_side:
+        scale = min_side / min(h, w)
+        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    return image
+def load_image_with_white_bg(path):
+    image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if image is None:
+        return None
+ 
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        return image
+ 
+    channels = image.shape[2]
+ 
+    if channels == 4:  
+        bgr = image[:, :, :3].astype(np.float32)
+        alpha = image[:, :, 3].astype(np.float32) / 255.0
+        alpha = alpha[:, :, np.newaxis]
+        white_bg = np.ones_like(bgr, dtype=np.float32) * 255.0
+        composited = bgr * alpha + white_bg * (1.0 - alpha)
+        image = np.clip(composited, 0, 255).astype(np.uint8)
+    elif channels == 1:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+ 
+    return image
+
 def proccess_datasets():
     mp_hands = mp.solutions.hands
     if not os.path.exists(RAW_dir):
@@ -46,11 +75,12 @@ def proccess_datasets():
             for fname in image_files:
                 total += 1
                 path = os.path.join(label_dir, fname)
-                image = cv2.imread(path)
+                image = load_image_with_white_bg(path)
                 if image is None:
                     print(f"Warning: Could not read image {path}. Skipping.")
                     skipped += 1
                     continue
+                image = upscale_if_small(image, min_side=300)
                 image = cv2.copyMakeBorder(image, 40, 40, 40, 40, cv2.BORDER_CONSTANT, value=[255, 255, 255])
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 results = hands.process(image_rgb)

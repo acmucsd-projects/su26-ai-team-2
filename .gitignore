@@ -7,3 +7,5 @@ venv/
 !models/.gitkeep
 .vscode/
 .DS_Store
+.env
+XX
