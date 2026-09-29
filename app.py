@@ -83,7 +83,7 @@ def main():
         st.markdown(
             """
             **Sign a Letter or Number**
-            Hold a hand sign steady and wait for the progress bar to fill.
+            Hold a hand sign steady and wait for the progress bar to fill. As of now J and Z are excluded because they require motion to sign.
 
             **Space** ✋
             Hold up an open hand, all five fingers spread,

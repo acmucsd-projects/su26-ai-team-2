@@ -21,7 +21,7 @@ MODEL_PATH = os.path.join("models", "sign_model.pkl")
 LABEL_ENCODER_PATH = os.path.join("models", "label_encoder.joblib") 
 SENTENCES_OUT = os.path.join("data", "process", "sentences.txt")
 
-CONFIDENCE_THRESHOLD = 0.01
+CONFIDENCE_THRESHOLD = 0.4
 EXCLUDED_LABELS = {"j", "z"}
 STABLE_FRAMES_REQUIRED = 15
 COOLDOWN_SECONDS = 1.0

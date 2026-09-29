@@ -1,4 +1,3 @@
-
 import os
 import re
 
@@ -46,11 +45,6 @@ def mirror_features(features):
 
 
 def recovery_attempts(image):
-    """Ways to retry a miss, each with the inverse to undo it on the landmarks.
-
-    Images are squared first so aspect_ratio stays 1.0 and rotation is exactly
-    invertible in feature space.
-    """
     base = pad_to_square(image)
     yield base, lambda f: f
     yield pad_to_square(upscale_if_small(image, min_side=800)), lambda f: f
@@ -61,7 +55,6 @@ def recovery_attempts(image):
 
 
 def extract_dataset():
-    """Landmarks plus the hand each sample came from."""
     mp_hands = mp.solutions.hands
     X, y, groups, is_recovered = [], [], [], []
     labels = sorted(d for d in os.listdir(RAW_dir) if os.path.isdir(os.path.join(RAW_dir, d)))
@@ -141,17 +134,12 @@ def build_model():
 
 
 def main():
-    X, y, groups, is_recovered = extract_dataset()
+    X, y, groups = extract_dataset()
 
-    # Test only on cleanly-detected samples. Recovered ones are intrinsically
-    # harder, so scoring on them would drag the number down and make this run
-    # look worse than a run without the recovery pass - even though recovery
-    # helps. Holding the test set fixed keeps runs comparable.
     print("\nScoring on hands the model never trained on...")
     folds = GroupKFold(n_splits=len(set(groups)))
     scores, truths, preds = [], [], []
     for train_idx, test_idx in folds.split(X, y, groups):
-        test_idx = test_idx[~is_recovered[test_idx]]
         Xa, ya = augment(X[train_idx], y[train_idx])
         model = build_model().fit(Xa, ya)
         pred = model.predict(X[test_idx])
